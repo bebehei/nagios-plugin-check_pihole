@@ -1,0 +1,100 @@
+#!/usr/bin/python3
+
+import argparse
+import json
+import sys
+import urllib.request
+import enum
+
+class STATUS(enum.Enum):
+    def __str__(self):
+        return self.name
+    OK       = 0
+    WARNING  = 1
+    CRITICAL = 2
+    UNKNOWN  = 3
+
+DEFAULT_URL = 'http://{host}/admin/api.php?summaryRaw'
+
+def understand_args():
+    """Parse command line options and return the parsed args"""
+    parser = argparse.ArgumentParser(description='Nagios Plugin to check pi-hole server')
+    parser.add_argument('-H', '--hostname',  metavar='IP',              help='Hostname', default='192.168.1.2')
+    parser.add_argument('-U', '--url',       metavar='URL',             help='Full custom URL (replaces host)')
+    parser.add_argument('-p', '--parameter', metavar='FIELD',           help='parameter to check')
+    parser.add_argument('-w', '--warning',   metavar='<int>', type=int, help='warning threshold')
+    parser.add_argument('-c', '--critical',  metavar='<int>', type=int, help='critical threshold')
+    return parser.parse_args()
+
+def die(msg):
+    """Bail out with an appropriate message for nagios"""
+    print("{name}: {msg}".format(name=STATUS.UNKNOWN, msg=msg))
+    sys.exit(STATUS.UNKNOWN.value)
+
+def grab_status(url):
+    """Grab the JSON from url and return it"""
+    try:
+        request = urllib.request.urlopen(url)
+        content = request.read()
+        return json.loads(content)
+    except urllib.error.URLError as e:
+        die("Error contacting server {}: {}".format(url, str(e)))
+    except ValueError:
+        die("Cannot decode JSON from API")
+
+def api_to_perf(elem, warn='', crit=''):
+    """map the api output to nagios perfdata"""
+    d={'UOM':'', 'min':'', 'max':''}
+    d['label'] = elem[0]
+    d['value'] = elem[1]
+    d['warn'] = warn
+    d['crit'] = crit
+
+    if d['label'] == 'gravity_last_updated':
+        t = d['value']['relative']
+        d['value'] = int(t['days']) * 86400 + int(t['hours']) * 3600 + int(t['minutes']) * 60
+        d['UOM'] = 's'
+        d['min'] = 0
+
+    return "'{label}'={value}{UOM};{warn};{crit};{min};{max}".format(**d)
+
+ARGS = understand_args()
+
+if ARGS.url:
+    STATUS_URL = ARGS.url
+else:
+    STATUS_URL = DEFAULT_URL.format(host=ARGS.hostname)
+
+OUTPUT = {
+    'status': STATUS.UNKNOWN,
+    'name': ARGS.parameter if ARGS.parameter else 'status',
+    'value': '',
+    'perfdata': '',
+}
+
+STATUS_JSON = grab_status(STATUS_URL)
+try:
+    OUTPUT['value'] = STATUS_JSON[OUTPUT['name']]
+except KeyError:
+    die("Parameter {} not in JSON API OUTPUT".format(OUTPUT['name']))
+
+## Test warnings and assemble perfdata ##
+if ARGS.parameter:
+    OUTPUT['value'] = int(OUTPUT['value'])
+    if ARGS.critical and OUTPUT['value'] >= ARGS.critical:
+        OUTPUT['status'] = STATUS.CRITICAL
+    elif ARGS.warning and OUTPUT['value'] >= ARGS.warning:
+        OUTPUT['status'] = STATUS.WARNING
+    else:
+        OUTPUT['status'] = STATUS.OK
+    OUTPUT['perfdata'] = "|" + api_to_perf((ARGS.parameter, OUTPUT['value']), ARGS.warning, ARGS.critical)
+else:
+    if OUTPUT['value'] == 'enabled':
+        OUTPUT['status'] = STATUS.OK
+    elif OUTPUT['value'] == 'disabled':
+        OUTPUT['status'] = STATUS.CRITICAL
+    # append the whole perfdata
+    OUTPUT['perfdata'] = "|" + " ".join(map(api_to_perf, STATUS_JSON.items()))
+
+print('{status}: {name} = {value}{perfdata}'.format(**OUTPUT))
+sys.exit(OUTPUT['status'].value)
