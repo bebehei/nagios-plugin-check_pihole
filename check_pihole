@@ -94,7 +94,7 @@ else:
     elif OUTPUT['value'] == 'disabled':
         OUTPUT['status'] = STATUS.CRITICAL
     # append the whole perfdata
-    OUTPUT['perfdata'] = "|" + " ".join(map(api_to_perf, STATUS_JSON.items()))
+    OUTPUT['perfdata'] = "|" + " ".join(sorted(map(api_to_perf, STATUS_JSON.items())))
 
 print('{status}: {name} = {value}{perfdata}'.format(**OUTPUT))
 sys.exit(OUTPUT['status'].value)
