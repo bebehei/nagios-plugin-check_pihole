@@ -14,7 +14,8 @@ class STATUS(enum.Enum):
     CRITICAL = 2
     UNKNOWN  = 3
 
-DEFAULT_URL = 'http://{host}/admin/api.php?summaryRaw'
+ API_KEY = '<ENTER API KEY>'
+ DEFAULT_URL = 'http://{host}/admin/api.php?summaryRaw'+'&auth='+str(API_KEY)
 
 def understand_args():
     """Parse command line options and return the parsed args"""
